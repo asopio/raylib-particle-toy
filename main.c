@@ -124,9 +124,13 @@ static void StepTrack(Track *t, float dt) {
 
     /* curve heading if charged */
     if (t->charge != 0.0f && t->curv_radius != 0.0f) {
+        float next_speed = fmaxf(t->speed - 18.0f * dt, 40.0f);
+        t->curv_radius = (t->mass * next_speed) /
+                         (fabsf(t->charge) * MAGNETIC_FIELD);
         float dtheta = step / t->curv_radius;
         if (t->charge < 0.0f) dtheta = -dtheta;
         t->angle    += dtheta;
+        t->speed     = next_speed;
     }
 
     /* advance position */
