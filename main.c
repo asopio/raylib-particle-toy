@@ -28,6 +28,8 @@
 #define BUBBLE_LIFETIME_MAX 4.0f
 #define TRACK_MAX_LENGTH 600.0f
 #define TRACK_MIN_LENGTH 150.0f
+#define TRACK_DECELERATION 18.0f
+#define TRACK_MIN_SPEED 40.0f
 
 /* ── types ──────────────────────────────────────────────────────── */
 
@@ -118,25 +120,31 @@ static void DrawBubbles(void) {
 static void StepTrack(Track *t, float dt) {
     if (!t->active) return;
 
+    float angle = t->angle;
+
+    if (t->charge != 0.0f) {
+        float next_speed = fmaxf(t->speed - TRACK_DECELERATION * dt,
+                                 TRACK_MIN_SPEED);
+        t->curv_radius = (t->mass * next_speed) /
+                         (fabsf(t->charge) * MAGNETIC_FIELD);
+        t->speed     = next_speed;
+    }
+
     float step = t->speed * dt;
     Vector2 prevPos = t->pos;
     t->dist   += step;
     t->accum  += step;
 
     /* curve heading if charged */
-    if (t->charge != 0.0f && t->curv_radius != 0.0f) {
-        float next_speed = fmaxf(t->speed - 18.0f * dt, 40.0f);
-        t->curv_radius = (t->mass * next_speed) /
-                         (fabsf(t->charge) * MAGNETIC_FIELD);
+    if (t->charge != 0.0f) {
         float dtheta = step / t->curv_radius;
         if (t->charge < 0.0f) dtheta = -dtheta;
         t->angle    += dtheta;
-        t->speed     = next_speed;
     }
 
     /* advance position */
-    t->pos.x += cosf(t->angle) * step;
-    t->pos.y += sinf(t->angle) * step;
+    t->pos.x += cosf(angle) * step;
+    t->pos.y += sinf(angle) * step;
 
     /* spawn bubbles along the path if visible */
     if (t->visible) {
