@@ -119,6 +119,7 @@ static void StepTrack(Track *t, float dt) {
     if (!t->active) return;
 
     float step = t->speed * dt;
+    Vector2 prevPos = t->pos;
     t->dist   += step;
     t->accum  += step;
 
@@ -141,10 +142,12 @@ static void StepTrack(Track *t, float dt) {
     if (t->visible) {
         while (t->accum >= BUBBLE_SPACING) {
             t->accum -= BUBBLE_SPACING;
+            float bubbleT = (step > 0.0f) ? (step - t->accum) / step : 0.0f;
+            Vector2 bubblePos = Vector2Lerp(prevPos, t->pos, bubbleT);
             /* jitter position slightly */
             Vector2 bp = {
-                t->pos.x + RandF(-1.5f, 1.5f),
-                t->pos.y + RandF(-1.5f, 1.5f)
+                bubblePos.x + RandF(-1.5f, 1.5f),
+                bubblePos.y + RandF(-1.5f, 1.5f)
             };
             SpawnBubble(bp);
         }
