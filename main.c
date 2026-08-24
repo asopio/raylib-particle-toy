@@ -192,9 +192,9 @@ static void CreateEvent(void) {
         RandF(100, SCREEN_H - 100)
     };
 
-    /* decide topology: 2-4 visible tracks, 0-1 neutral */
+    /* decide topology: 2-4 visible tracks plus one neutral residual track */
     int nVisible  = GetRandomValue(2, 4);
-    int nNeutral  = GetRandomValue(0, 1);
+    int nNeutral  = 1;
     ev->nTracks   = nVisible + nNeutral;
     if (ev->nTracks > 6) ev->nTracks = 6;
 
@@ -224,22 +224,22 @@ static void CreateEvent(void) {
         totalPy += py;
     }
 
-    /* neutral tracks carry the leftover momentum so conservation holds */
+    /* neutral track carries the leftover momentum so conservation holds */
     if (nNeutral > 0) {
         float neutralPx = -totalPx / nNeutral;
         float neutralPy = -totalPy / nNeutral;
+        float neutralP  = sqrtf(neutralPx * neutralPx + neutralPy * neutralPy);
         for (int i = nVisible; i < ev->nTracks; i++) {
             Track *t   = &ev->tracks[i];
             t->charge  = 0.0f;
-            t->mass    = RandF(1.0f, 5.0f);
-            t->speed   = sqrtf(neutralPx * neutralPx + neutralPy * neutralPy) / t->mass;
-            if (t->speed < 10.0f) t->speed = 10.0f;
+            t->speed   = RandF(120.0f, 280.0f);
+            t->mass    = (neutralP > 0.0f) ? neutralP / t->speed : 0.0f;
             t->angle   = atan2f(neutralPy, neutralPx);
             t->pos     = origin;
             t->dist    = 0.0f;
-            t->max_dist = RandF(TRACK_MIN_LENGTH, TRACK_MAX_LENGTH);
+            t->max_dist = (neutralP > 0.0f) ? RandF(TRACK_MIN_LENGTH, TRACK_MAX_LENGTH) : 0.0f;
             t->accum   = 0.0f;
-            t->active  = true;
+            t->active  = (neutralP > 0.0f);
             t->visible = false;  /* invisible neutral track */
             t->curv_radius = 0.0f;
         }
