@@ -36,7 +36,6 @@ typedef struct Bubble {
     float   radius;
     float   lifetime;  /* seconds until fully faded */
     float   age;       /* seconds since spawn */
-    bool    active;
 } Bubble;
 
 typedef struct Track {
@@ -91,7 +90,6 @@ static void SpawnBubble(Vector2 pos) {
     b->radius  = RandF(1.0f, 2.8f);
     b->lifetime = RandF(BUBBLE_LIFETIME_MIN, BUBBLE_LIFETIME_MAX);
     b->age     = 0.0f;
-    b->active  = true;
 }
 
 static void UpdateBubbles(float dt) {
@@ -127,6 +125,7 @@ static void StepTrack(Track *t, float dt) {
     /* curve heading if charged */
     if (t->charge != 0.0f && t->curv_radius != 0.0f) {
         float dtheta = step / t->curv_radius;
+        if (t->charge < 0.0f) dtheta = -dtheta;
         t->angle    += dtheta;
     }
 
@@ -160,7 +159,9 @@ static void StepTrack(Track *t, float dt) {
 /*
  * Create a physics event at a random screen position.
  * Momentum is conserved across all outgoing tracks (including invisible
- * neutral ones), so some vertices will appear to violate conservation.
+ * neutral ones).  Because neutral tracks are not rendered, some vertices
+ * will appear to violate conservation when only visible tracks are
+ * considered.
  */
 static void CreateEvent(void) {
     if (eventCount >= MAX_EVENTS) {
@@ -206,9 +207,9 @@ static void CreateEvent(void) {
         t->active  = true;
         t->visible = true;
 
-        /* curvature: R = m*v / (q*B) */
+        /* curvature: R = m*v / (|q|*B); sign of charge controls direction */
         t->curv_radius = (t->mass * t->speed) /
-                         (t->charge * MAGNETIC_FIELD);
+                         (fabsf(t->charge) * MAGNETIC_FIELD);
 
         float px = t->mass * t->speed * cosf(t->angle);
         float py = t->mass * t->speed * sinf(t->angle);
