@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bubble Chamber</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0c12;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: system-ui, sans-serif;
+            color: #6a7090;
+        }
+        #container {
+            text-align: center;
+        }
+        canvas.emscripten {
+            display: block;
+            margin: 0 auto;
+            border: 1px solid #1a1d2a;
+            border-radius: 4px;
+        }
+        p {
+            margin-top: 12px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas class="emscripten" id="canvas"
+                oncontextmenu="event.preventDefault()"
+                tabindex="0"></canvas>
+        <p>Toy Bubble Chamber Simulation &mdash; Raylib + WebAssembly</p>
+    </div>
+
+    <script>
+        var Module = {
+            canvas: (function() { return document.getElementById('canvas'); })()
+        };
+    </script>
+    {{{ SCRIPT }}}
+</body>
+</html>
