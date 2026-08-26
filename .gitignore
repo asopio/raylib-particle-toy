@@ -1,0 +1,11 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# build outputs
+/build-native/
+/build-web/
+/bubble_chamber
+/bubble_chamber.html
+/bubble_chamber.js
+/bubble_chamber.wasm

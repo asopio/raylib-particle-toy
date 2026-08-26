@@ -1,0 +1,17 @@
+[workspace]
+authors = ["Alex <alexander.linus.sopio@cern.ch>"]
+channels = ["conda-forge"]
+name = "raylib-particle-toy"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[dependencies]
+gcc = ">=16.2.0,<16.3"
+cmake = "*"
+ninja = "*"
+python = "==3.14"
+
+[tasks]
+setup-web = { description = "Install & activate the Emscripten toolchain from the emsdk/ submodule", cmd = "cd emsdk && ./emsdk install latest && ./emsdk activate latest" }
+build = { description = "Build the native bubble_chamber binary", cmd = "make build" }
+web = { description = "Build the WebAssembly bubble_chamber.html", cmd = "make web" }
