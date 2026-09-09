@@ -53,6 +53,10 @@
 #define TRACK_DECELERATION 18.0f
 #define TRACK_MIN_SPEED 40.0f
 
+/* fixed-timestep physics */
+#define PHYSICS_DT      (1.0f / 120.0f)  /* 120 Hz physics substeps       */
+#define MAX_FRAME_DT    (1.0f / 15.0f)   /* clamp: ignore >~66 ms frames  */
+
 /* ── types ──────────────────────────────────────────────────────── */
 
 typedef struct Bubble {
@@ -93,6 +97,7 @@ static int     bubbleCount  = 0;
 static Event   events[MAX_EVENTS];
 static int     eventCount   = 0;
 static float   nextEventTimer = 0.0f;
+static float   trackAccum     = 0.0f;  /* fixed-timestep physics accumulator */
 static Camera3D cam;
 static float   camX = 0.0f;   /* camera's world-x position (scrolls) */
 
@@ -371,24 +376,30 @@ int main(void) {
 
 static void UpdateDrawFrame(void) {
     float dt = GetFrameTime();
-    if (dt > 0.1f) dt = 0.1f;   /* clamp after tab-switch etc. */
 
-    /* ── periodic event spawning ── */
-    nextEventTimer -= dt;
-    if (nextEventTimer <= 0.0f) {
-        CreateEvent();
-        nextEventTimer = RandF(EVENT_INTERVAL_MIN, EVENT_INTERVAL_MAX);
-    }
-
-    /* ── update tracks ── */
-    for (int e = 0; e < eventCount; e++) {
-        for (int t = 0; t < events[e].nTracks; t++) {
-            StepTrack(&events[e].tracks[t], dt);
+    /* ── fixed-timestep physics ── */
+    trackAccum += dt;
+    if (trackAccum > MAX_FRAME_DT) trackAccum = MAX_FRAME_DT;
+    while (trackAccum >= PHYSICS_DT) {
+        /* periodic event spawning */
+        nextEventTimer -= PHYSICS_DT;
+        if (nextEventTimer <= 0.0f) {
+            CreateEvent();
+            nextEventTimer = RandF(EVENT_INTERVAL_MIN, EVENT_INTERVAL_MAX);
         }
-    }
 
-    /* ── update bubbles ── */
-    UpdateBubbles(dt);
+        /* update tracks */
+        for (int e = 0; e < eventCount; e++) {
+            for (int t = 0; t < events[e].nTracks; t++) {
+                StepTrack(&events[e].tracks[t], PHYSICS_DT);
+            }
+        }
+
+        /* update bubbles */
+        UpdateBubbles(PHYSICS_DT);
+
+        trackAccum -= PHYSICS_DT;
+    }
 
     /* ── update camera (slow horizontal drift => parallax) ── */
     UpdateCameraPos(dt);
