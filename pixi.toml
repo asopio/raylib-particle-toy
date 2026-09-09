@@ -2,14 +2,35 @@
 authors = ["Alex <alexander.linus.sopio@cern.ch>"]
 channels = ["conda-forge"]
 name = "raylib-particle-toy"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [dependencies]
 gcc = ">=16.2.0,<16.3"
+gxx = ">=16.2.0,<16.3"   # raylib's CMake requires a C++ compiler (GLFW backend)
 cmake = "*"
 ninja = "*"
 python = "==3.14"
+binutils = ">=2.45,<3"   # provides `ar`; needed to archive the static raylib lib
+make = ">=4.4.1,<5"
+
+# Native (X11/GL) build dependencies, Linux only.  On macOS raylib links the
+# system Cocoa/OpenGL frameworks, so none of these are needed (and most are not
+# published for osx-arm64).  On Linux raylib builds its own GLFW, which needs the
+# X11 + OpenGL *headers* to compile.  Note: conda-forge's `libgl`/`mesalib`
+# packages ship only the runtime .so - the <GL/gl.h> header lives in the separate
+# `libgl-devel` package, so both are listed here.
+[target.linux-64.dependencies]
+glfw = "*"
+xorg-libx11 = "*"
+xorg-libxrandr = "*"
+xorg-libxinerama = "*"
+xorg-libxcursor = "*"
+xorg-libxext = "*"
+libxkbcommon = "*"
+libgl = "*"
+libgl-devel = "*"
+xorg-libxxf86vm = "*"   # GLFW (raylib) links -lXxf86vm for screen-saver/vidmode
 
 [tasks]
 setup-web = { description = "Install & activate the Emscripten toolchain from the emsdk/ submodule", cmd = "cd emsdk && ./emsdk install latest && ./emsdk activate latest" }

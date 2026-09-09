@@ -36,6 +36,10 @@ then open `http://localhost:8000/bubble_chamber.html`.
 
 - The native build on macOS uses `clang` (conda-forge `gcc` cannot compile
   Apple's block-based system headers); on Linux it uses `gcc`.
+- `pixi.toml` is configured for both `osx-arm64` and `linux-64`.  On Linux the
+  conda-forge env additionally provides the X11/OpenGL development headers
+  (`libgl-devel` ships `<GL/gl.h>`, which the plain `libgl` runtime package does
+  not) so raylib's bundled GLFW compiles and the app links.
 - `raylib` is compiled from the submodule on first use (CMake + Ninja),
   separately for native and web targets, into `build-native/` and `build-web/`.
 - Emscripten is provided by the `emsdk` submodule, not by conda-forge; the
