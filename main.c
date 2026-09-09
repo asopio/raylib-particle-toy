@@ -106,7 +106,7 @@ static int     eventCount   = 0;
 static float   nextEventTimer = 0.0f;
 static float   trackAccum     = 0.0f;  /* fixed-timestep physics accumulator */
 static Camera3D cam;
-static float   camX = 0.0f;   /* camera's world-x position (scrolls) */
+static float   camX = 0.0f;   /* camera's world-x position (scrolls linearly, never wraps) */
 
 static const float WORLD_DX = WORLD_X1 - WORLD_X0;   /* wrapping width */
 
@@ -133,6 +133,18 @@ static void WrapPos(Vector3 *p) {
     if (p->y > WORLD_Y1) p->y = WORLD_Y1;
     if (p->z < WORLD_Z0) p->z = WORLD_Z0;
     if (p->z > WORLD_Z1) p->z = WORLD_Z1;
+}
+
+/*
+ * Camera-relative x: the world is periodic in x with period WORLD_DX, so for
+ * any effect (culling, the reference plane, ...) we only need each object's
+ * x offset from the camera, folded into one wrapping cell.  Positive result
+ * means the object is to the camera's right.
+ */
+static float CamRelX(float worldX) {
+    float d = WrapX(worldX - camX) - WORLD_X0;   /* 0 .. WORLD_DX           */
+    d -= 0.5f * WORLD_DX;                        /* -DX/2 .. +DX/2          */
+    return (d > 0.5f * WORLD_DX) ? d - WORLD_DX : d;
 }
 
 /*
@@ -341,8 +353,8 @@ static void CreateEvent(void) {
 /* ── camera ─────────────────────────────────────────────────────── */
 
 static void UpdateCameraPos(float dt) {
-    camX += CAM_SPEED * dt;
-    camX = WrapX(camX);   /* camera itself wraps, keeping it inside the box */
+    camX += CAM_SPEED * dt;   /* scroll linearly: the camera never wraps, so the
+                                 periodic world keeps scrolling past it forever */
 
     /* looks down +y into the box: x is screen-right, z is screen-up */
     cam = (Camera3D){
@@ -416,10 +428,18 @@ static void UpdateDrawFrame(void) {
     BeginDrawing();
         ClearBackground((Color){ 10, 12, 18, 255 });   /* dark blue-black */
         BeginMode3D(cam);
-            /* far reference plane (depth cue) at the back of the box, y = WORLD_Y1 */
-            DrawPlane((Vector3){ 0, WORLD_Y1, 0 },
-                      (Vector2){ WORLD_DX + 400.0f, WORLD_Z1 - WORLD_Z0 + 400.0f },
-                      (Color){ 20, 24, 36, 255 });
+            /* far reference plane (depth cue): one copy per wrapping cell that
+               can be on screen, placed at the camera-relative x so the world
+               looks seamless as it scrolls past */
+            float halfH = (float)SCREEN_H * tanf(Radians(25.0f)) * 300.0f;
+            float halfW = (float)SCREEN_W * tanf(Radians(25.0f)) * 300.0f;
+            for (int k = -2; k <= 2; k++) {
+                float px = WORLD_X0 + k * WORLD_DX + CamRelX(0.0f);
+                if (px < -halfW || px > halfW + WORLD_DX) continue;
+                DrawPlane((Vector3){ px, WORLD_Y1, 0 },
+                          (Vector2){ WORLD_DX + 400.0f, WORLD_Z1 - WORLD_Z0 + 400.0f },
+                          (Color){ 20, 24, 36, 255 });
+            }
         EndMode3D();
 
         DrawBubbles();
