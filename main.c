@@ -3,11 +3,17 @@
  * A minimal C/Raylib particle simulation that renders charged particle
  * tracks as strings of bubbles spiralling through a magnetic field.
  *
- * The simulation takes place in a 3D box that wraps horizontally: tracks
- * (and their bubbles) leaving the left edge reappear on the right.  The
- * camera slowly drifts along the horizontal axis so that the parallax
- * between near and far tracks is visible.  Bubbles fade with distance
- * from the viewer (perspective depth cue).
+ * The simulation takes place in a 3D box.  A uniform magnetic field points
+ * along the y-axis (perpendicular to the screen plane).  Charged particles
+ * feel the real Lorentz force F = q (v x B), so their tracks curve in the
+ * x-z plane with radius R = m v / (|q| B) - evaluated from the cross product
+ * each physics step, not baked in.
+ *
+ * The camera looks down the +z axis (the x-y plane is the screen) and slowly
+ * drifts along x, so the parallax between near and far tracks is visible.
+ * The world wraps horizontally (x): tracks and their bubbles leaving the
+ * left edge reappear on the right.  Bubbles fade with their distance from
+ * the viewer (perspective depth cue).
  *
  * Compiles natively or to WebAssembly via Emscripten.
  */
@@ -27,25 +33,27 @@
 #define MAX_EVENTS     32
 #define BUBBLE_SPACING 3.0f
 
-/* simulation box (world units) */
+/* simulation box (world units).  Screen plane is x-y; +z recedes from camera */
 #define WORLD_X0      -400.0f     /* left wrapping edge  */
 #define WORLD_X1       400.0f     /* right wrapping edge */
-#define WORLD_Z0       -40.0f     /* near plane-ish      */
-#define WORLD_Z1       600.0f     /* far plane           */
-#define WORLD_Y0        -60.0f
-#define WORLD_Y1        340.0f
+#define WORLD_Y0      -300.0f     /* top of screen       */
+#define WORLD_Y1       300.0f     /* bottom of screen    */
+#define WORLD_Z0       -600.0f    /* far plane (depth)   */
+#define WORLD_Z1         40.0f    /* near plane-ish      */
 
-/* camera */
-#define CAM_DISTANCE    120.0f    /* camera sits this far in front of z=0 */
-#define CAM_SPEED        20.0f    /* px/s horizontal scroll speed        */
+/* camera: looks down +z; the x-y plane is the screen, x scrolls */
+#define CAM_Z            0.0f    /* camera at z = 0 (near side of box)   */
+#define CAM_Y            0.0f    /* camera height (world y = 0 is screen mid) */
+#define CAM_SPEED        20.0f   /* px/s horizontal (x) scroll speed        */
 
-/* perspective depth fading:  alpha = 1/(1 + k * (z/cam_z - 1)^2) */
+/* perspective depth fading:  alpha = 1/(1 + k * (dist/CAM_DEPTH)^2) */
+#define CAM_DEPTH       500.0f    /* reference distance for the fade curve */
 #define DEPTH_FADE_K      1.2f
 #define MIN_FADE          0.12f   /* floor for very far bubbles        */
-
 #define EVENT_INTERVAL_MIN 2.0f
 #define EVENT_INTERVAL_MAX 5.0f
-#define MAGNETIC_FIELD 1.0f          /* arbitrary units, controls curvature */
+/* uniform magnetic field: B = (0, +B, 0) - along the y axis */
+#define B_MAGNETIC      1.0f
 #define BUBBLE_LIFETIME_MIN 1.5f
 #define BUBBLE_LIFETIME_MAX 4.0f
 #define TRACK_MAX_LENGTH 600.0f
@@ -68,15 +76,12 @@ typedef struct Bubble {
 
 typedef struct Track {
     /* physics */
-    float charge;      /* sign: +1 or -1 (0 = neutral/invisible) */
-    float mass;        /* controls radius of curvature */
-    float speed;       /* px / s along track                     */
-    float curv_radius; /* computed: mass*speed / (charge*B)       */
+    float   charge;    /* sign: +1 or -1 (0 = neutral/invisible) */
+    float   mass;      /* controls radius of curvature          */
+    Vector3 vel;       /* velocity (px/s); |vel| = speed        */
 
     /* state */
     Vector3 pos;
-    float   angle;     /* current heading in the XZ plane (radians) */
-    float   dy;        /* vertical drift component (px/s)           */
     float   dist;      /* total distance drawn so far             */
     float   max_dist;  /* how far this track goes                 */
     float   accum;     /* accumulator for bubble spacing          */
@@ -130,13 +135,14 @@ static void WrapPos(Vector3 *p) {
 
 /*
  * Perspective distance fading.
- * zRel is the bubble's distance in front of the camera (its world z).
- * Returns 1.0 at the camera plane, falling off with distance squared.
+ * dist is the bubble's straight-line distance from the camera.
+ * Returns 1.0 at the reference plane (dist = CAM_DEPTH), falling off with
+ * distance squared.
  */
-static float DepthFade(float zRel) {
-    /* zRel is the bubble's distance in front of the camera plane (z=0 at
-       the near reference, z=CAM_DISTANCE is roughly one "unit" away). */
-    float d = fabsf(zRel / CAM_DISTANCE);
+static float DepthFade(float dist) {
+    /* dist = bubble's distance from the camera.  1.0 near the reference
+       plane (dist = CAM_DEPTH), falling off with distance squared. */
+    float d = fabsf(dist) / CAM_DEPTH;
     float f = 1.0f / (1.0f + DEPTH_FADE_K * d * d);
     return f < MIN_FADE ? MIN_FADE : f;
 }
@@ -178,9 +184,10 @@ static void DrawBubbles(void) {
         float t   = b->age / b->lifetime;          /* 0 → 1 */
         float lifeAlpha = 1.0f - t * t;            /* fade curve */
 
-        /* depth fading: distance in front of the camera plane (z=0) */
-        float zRel = b->pos.z;               /* 0 = near, CAM_DISTANCE = far */
-        float alpha = lifeAlpha * DepthFade(zRel);
+        /* depth fading: straight-line distance from the camera */
+        Vector3 toCam = Vector3Subtract(b->pos, cam.position);
+        float distCam = Vector3Length(toCam);
+        float alpha = lifeAlpha * DepthFade(distCam);
 
         Vector2 sp = GetWorldToScreen(b->pos, cam);
         DrawCircleV(sp, b->radius, BubbleColor(alpha));
@@ -192,32 +199,36 @@ static void DrawBubbles(void) {
 static void StepTrack(Track *t, float dt) {
     if (!t->active) return;
 
-    float angle = t->angle;
-
-    if (t->charge != 0.0f) {
-        float next_speed = fmaxf(t->speed - TRACK_DECELERATION * dt,
-                                 TRACK_MIN_SPEED);
-        t->curv_radius = (t->mass * next_speed) /
-                         (fabsf(t->charge) * MAGNETIC_FIELD);
-        t->speed     = next_speed;
-    }
-
-    float step = t->speed * dt;
     Vector3 prevPos = t->pos;
+    float speed = Vector3Length(t->vel);
+    float step  = speed * dt;
     t->dist   += step;
     t->accum  += step;
 
-    /* curve heading if charged (spiral in the XZ plane) */
     if (t->charge != 0.0f) {
-        float dtheta = step / t->curv_radius;
-        if (t->charge < 0.0f) dtheta = -dtheta;
-        t->angle    += dtheta;
+        /*
+         * Lorentz force:  F = q (v x B).  With B = (0, B, 0):
+         *     v x B = | i  j  k |
+         *             |vx vy vz|
+         *             | 0 B  0 |
+         *           = (-vy*B, 0, vx*B)
+         *     F/m   = (qB/m) * (-vy, 0, vx)
+         *
+         * The force is perpendicular to v (it only bends the track, it
+         * never changes the speed), so we integrate semi-implicitly: add
+         * the force to the velocity, then keep the magnitude constant.
+         */
+        Vector3 B = { 0.0f, B_MAGNETIC, 0.0f };
+        Vector3 cross = Vector3CrossProduct(t->vel, B);      /* v x B     */
+        Vector3 acc   = Vector3Scale(cross, t->charge / t->mass); /* F/m = a */
+        t->vel        = Vector3Add(t->vel, Vector3Scale(acc, dt));
+        t->vel        = Vector3Normalize(t->vel);           /* |v| = 1   */
+        t->vel        = Vector3Scale(t->vel, speed);        /* |v| = speed */
     }
 
-    /* advance position */
-    t->pos.x += cosf(angle) * step;
-    t->pos.z += sinf(angle) * step;
-    t->pos.y += t->dy * dt;
+    /* advance position along (possibly bent) velocity */
+    t->pos = Vector3Add(t->pos, Vector3Scale(t->vel, dt));
+    WrapPos(&t->pos);
 
     /* spawn bubbles along the path if visible */
     if (t->visible) {
@@ -267,11 +278,11 @@ static void CreateEvent(void) {
     memset(ev, 0, sizeof(*ev));
     ev->active = true;
 
-    /* origin: biased toward the camera side so new events are seen */
+    /* origin: anywhere in the box (biased toward the near side) */
     Vector3 origin = {
         WrapX(RandF(WORLD_X0, WORLD_X0 + WORLD_DX)),
-        RandF(60.0f, 280.0f),
-        RandF(0.0f, WORLD_Z1)
+        RandF(40.0f, 260.0f),
+        RandF(50.0f, WORLD_Z1)
     };
 
     /* decide topology: 2-4 visible tracks plus one neutral residual track */
@@ -280,53 +291,47 @@ static void CreateEvent(void) {
     ev->nTracks   = nVisible + nNeutral;
     if (ev->nTracks > 6) ev->nTracks = 6;
 
-    /* first pass – assign random momenta to visible tracks */
-    float totalPx = 0.0f, totalPz = 0.0f;
+    /* first pass – assign random 3D momenta to the visible tracks */
+    Vector3 totalP = { 0.0f, 0.0f, 0.0f };
 
     for (int i = 0; i < nVisible; i++) {
         Track *t   = &ev->tracks[i];
         t->charge  = (GetRandomValue(0, 1) == 0) ? 1.0f : -1.0f;
         t->mass    = RandF(1.0f, 10.0f);
-        t->speed   = RandF(120.0f, 280.0f);
-        t->angle   = RandF(0, 2.0f * PI);   /* heading in XZ plane */
-        t->dy      = RandF(-30.0f, 30.0f);  /* gentle vertical drift */
-        t->pos     = origin;
-        t->dist    = 0.0f;
+        float speed = RandF(120.0f, 280.0f);
+
+        /* random unit direction */
+        Vector3 dir = Vector3Normalize((Vector3){ RandF(-1, 1), RandF(-1, 1), RandF(-1, 1) });
+        if (Vector3Length(dir) < 0.5f) dir = (Vector3){ 1.0f, 0.0f, 0.0f };
+        t->vel = Vector3Scale(dir, speed);
+
+        t->pos      = origin;
+        t->dist     = 0.0f;
         t->max_dist = RandF(TRACK_MIN_LENGTH, TRACK_MAX_LENGTH);
-        t->accum   = 0.0f;
-        t->active  = true;
-        t->visible = true;
+        t->accum    = 0.0f;
+        t->active   = true;
+        t->visible  = true;
 
-        /* curvature: R = m*v / (|q|*B); sign of charge controls direction */
-        t->curv_radius = (t->mass * t->speed) /
-                         (fabsf(t->charge) * MAGNETIC_FIELD);
-
-        /* momentum in the XZ plane */
-        float px = t->mass * t->speed * cosf(t->angle);
-        float pz = t->mass * t->speed * sinf(t->angle);
-        totalPx += px;
-        totalPz += pz;
+        /* momentum p = m v; accumulate for conservation */
+        Vector3 p = Vector3Scale(t->vel, t->mass);
+        totalP   = Vector3Add(totalP, p);
     }
 
     /* neutral track carries the leftover momentum so conservation holds */
     if (nNeutral > 0) {
-        float neutralPx = -totalPx / nNeutral;
-        float neutralPz = -totalPz / nNeutral;
-        float neutralP  = sqrtf(neutralPx * neutralPx + neutralPz * neutralPz);
+        Vector3 neutralP = Vector3Scale(totalP, -1.0f / nNeutral);
+        float neutralSpeed = Vector3Length(neutralP);
         for (int i = nVisible; i < ev->nTracks; i++) {
             Track *t   = &ev->tracks[i];
             t->charge  = 0.0f;
-            t->speed   = RandF(120.0f, 280.0f);
-            t->mass    = (neutralP > 0.0f) ? neutralP / t->speed : 0.0f;
-            t->angle   = atan2f(neutralPz, neutralPx);
-            t->dy      = RandF(-30.0f, 30.0f);
+            t->mass    = 1.0f;
+            t->vel     = neutralP;                 /* |vel| = speed (m = 1) */
             t->pos     = origin;
             t->dist    = 0.0f;
-            t->max_dist = (neutralP > 0.0f) ? RandF(TRACK_MIN_LENGTH, TRACK_MAX_LENGTH) : 0.0f;
+            t->max_dist = (neutralSpeed > 0.0f) ? RandF(TRACK_MIN_LENGTH, TRACK_MAX_LENGTH) : 0.0f;
             t->accum   = 0.0f;
-            t->active  = (neutralP > 0.0f);
-            t->visible = false;  /* invisible neutral track */
-            t->curv_radius = 0.0f;
+            t->active  = (neutralSpeed > 0.0f);
+            t->visible = false;                    /* invisible neutral track */
         }
     }
 }
@@ -337,9 +342,10 @@ static void UpdateCameraPos(float dt) {
     camX += CAM_SPEED * dt;
     camX = WrapX(camX);   /* camera itself wraps, keeping it inside the box */
 
+    /* looks straight down +z: x is screen-right, y is screen-up, z recedes */
     cam = (Camera3D){
-        .position = (Vector3){ camX, 180.0f, CAM_DISTANCE },
-        .target   = (Vector3){ camX, 140.0f, 0.0f },
+        .position = (Vector3){ camX, CAM_Y, CAM_Z },
+        .target   = (Vector3){ camX, CAM_Y, 300.0f },
         .up       = (Vector3){ 0.0f, 1.0f, 0.0f },
         .projection = CAMERA_PERSPECTIVE,
         .fovy       = 50.0f
@@ -408,9 +414,9 @@ static void UpdateDrawFrame(void) {
     BeginDrawing();
         ClearBackground((Color){ 10, 12, 18, 255 });   /* dark blue-black */
         BeginMode3D(cam);
-            /* floor plane as a depth reference */
-            DrawPlane((Vector3){ 0, -10, 300 }, (Vector2){ 2200, 1000 },
-                      (Color){ 25, 30, 45, 255 });
+            /* far reference plane (depth cue) */
+            DrawPlane((Vector3){ 0, 0, WORLD_Z0 }, (Vector2){ WORLD_DX + 400.0f, 800.0f },
+                      (Color){ 20, 24, 36, 255 });
         EndMode3D();
 
         DrawBubbles();
