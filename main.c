@@ -431,11 +431,12 @@ static void UpdateDrawFrame(void) {
             /* far reference plane (depth cue): one copy per wrapping cell that
                can be on screen, placed at the camera-relative x so the world
                looks seamless as it scrolls past */
-            float halfH = (float)SCREEN_H * tanf(Radians(25.0f)) * 300.0f;
-            float halfW = (float)SCREEN_W * tanf(Radians(25.0f)) * 300.0f;
+            /* cull planes that can't be on screen (half viewport width at
+               the plane's depth, with margin) */
+            float cullW = 0.5f * (float)SCREEN_W * tanf(0.5f * 50.0f * 3.14159265f / 180.0f) * 300.0f + 200.0f;
             for (int k = -2; k <= 2; k++) {
-                float px = WORLD_X0 + k * WORLD_DX + CamRelX(0.0f);
-                if (px < -halfW || px > halfW + WORLD_DX) continue;
+                float px = CamRelX(WORLD_X0 + k * WORLD_DX);
+                if (px < -cullW || px > cullW) continue;
                 DrawPlane((Vector3){ px, WORLD_Y1, 0 },
                           (Vector2){ WORLD_DX + 400.0f, WORLD_Z1 - WORLD_Z0 + 400.0f },
                           (Color){ 20, 24, 36, 255 });
