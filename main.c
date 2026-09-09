@@ -3,17 +3,19 @@
  * A minimal C/Raylib particle simulation that renders charged particle
  * tracks as strings of bubbles spiralling through a magnetic field.
  *
- * The simulation takes place in a 3D box.  A uniform magnetic field points
- * along the y-axis (perpendicular to the screen plane).  Charged particles
- * feel the real Lorentz force F = q (v x B), so their tracks curve in the
- * x-z plane with radius R = m v / (|q| B) - evaluated from the cross product
- * each physics step, not baked in.
+ * The simulation takes place in a 3D box.  The screen is the x-z plane (x
+ * horizontal, z vertical) and the y-axis points into/out of the screen.  A
+ * uniform magnetic field points along the y-axis - perpendicular to the
+ * screen plane.  Charged particles feel the real Lorentz force F = q (v x B),
+ * so their tracks curve in the x-y plane with radius R = m v / (|q| B) -
+ * evaluated from the cross product each physics step, not baked in.
  *
- * The camera looks down the +z axis (the x-y plane is the screen) and slowly
- * drifts along x, so the parallax between near and far tracks is visible.
- * The world wraps horizontally (x): tracks and their bubbles leaving the
- * left edge reappear on the right.  Bubbles fade with their distance from
- * the viewer (perspective depth cue).
+ * The camera sits above the box (y = 0) and looks down +y into it, and slowly
+ * drifts along x,
+ * so the parallax between near and far tracks is visible.  The world wraps
+ * horizontally (x): tracks and their bubbles leaving the left edge reappear
+ * on the right.  Bubbles fade with their distance from the viewer
+ * (perspective depth cue).
  *
  * Compiles natively or to WebAssembly via Emscripten.
  */
@@ -33,21 +35,21 @@
 #define MAX_EVENTS     32
 #define BUBBLE_SPACING 3.0f
 
-/* simulation box (world units).  Screen plane is x-y; +z recedes from camera */
+/* simulation box (world units).  Screen plane is x-z; +y goes into the box */
 #define WORLD_X0      -400.0f     /* left wrapping edge  */
 #define WORLD_X1       400.0f     /* right wrapping edge */
-#define WORLD_Y0      -300.0f     /* top of screen       */
-#define WORLD_Y1       300.0f     /* bottom of screen    */
-#define WORLD_Z0       -600.0f    /* far plane (depth)   */
-#define WORLD_Z1         40.0f    /* near plane-ish      */
+#define WORLD_Y0        40.0f     /* near plane (close to camera) */
+#define WORLD_Y1       600.0f     /* far plane (depth)           */
+#define WORLD_Z0      -300.0f     /* bottom of screen            */
+#define WORLD_Z1       300.0f     /* top of screen               */
 
-/* camera: looks down +z; the x-y plane is the screen, x scrolls */
-#define CAM_Z            0.0f    /* camera at z = 0 (near side of box)   */
-#define CAM_Y            0.0f    /* camera height (world y = 0 is screen mid) */
-#define CAM_SPEED        20.0f   /* px/s horizontal (x) scroll speed        */
+/* camera: sits above the box at y=0 and looks down +y; the x-z plane (y=0)
+   is the screen, x scrolls horizontally */
+#define CAM_Y          0.0f      /* camera height (above the box)        */
+#define CAM_SPEED      20.0f     /* px/s horizontal (x) scroll speed     */
 
 /* perspective depth fading:  alpha = 1/(1 + k * (dist/CAM_DEPTH)^2) */
-#define CAM_DEPTH       500.0f    /* reference distance for the fade curve */
+#define CAM_DEPTH     500.0f     /* reference distance for the fade curve */
 #define DEPTH_FADE_K      1.2f
 #define MIN_FADE          0.12f   /* floor for very far bubbles        */
 #define EVENT_INTERVAL_MIN 2.0f
@@ -278,11 +280,11 @@ static void CreateEvent(void) {
     memset(ev, 0, sizeof(*ev));
     ev->active = true;
 
-    /* origin: anywhere in the box (biased toward the near side) */
+    /* origin: anywhere in the box */
     Vector3 origin = {
-        WrapX(RandF(WORLD_X0, WORLD_X0 + WORLD_DX)),
-        RandF(40.0f, 260.0f),
-        RandF(50.0f, WORLD_Z1)
+        WrapX(RandF(WORLD_X0, WORLD_X0 + WORLD_DX)),   /* x: horizontal, wraps */
+        RandF(WORLD_Y0, WORLD_Y1),                     /* y: depth into box */
+        RandF(WORLD_Z0, WORLD_Z1)                      /* z: vertical on screen */
     };
 
     /* decide topology: 2-4 visible tracks plus one neutral residual track */
@@ -342,11 +344,11 @@ static void UpdateCameraPos(float dt) {
     camX += CAM_SPEED * dt;
     camX = WrapX(camX);   /* camera itself wraps, keeping it inside the box */
 
-    /* looks straight down +z: x is screen-right, y is screen-up, z recedes */
+    /* looks down +y into the box: x is screen-right, z is screen-up */
     cam = (Camera3D){
-        .position = (Vector3){ camX, CAM_Y, CAM_Z },
-        .target   = (Vector3){ camX, CAM_Y, 300.0f },
-        .up       = (Vector3){ 0.0f, 1.0f, 0.0f },
+        .position = (Vector3){ camX, CAM_Y, 0.0f },
+        .target   = (Vector3){ camX, 300.0f, 0.0f },   /* look down +y */
+        .up       = (Vector3){ 0.0f, 0.0f, 1.0f },     /* world +z = screen up */
         .projection = CAMERA_PERSPECTIVE,
         .fovy       = 50.0f
     };
@@ -414,8 +416,9 @@ static void UpdateDrawFrame(void) {
     BeginDrawing();
         ClearBackground((Color){ 10, 12, 18, 255 });   /* dark blue-black */
         BeginMode3D(cam);
-            /* far reference plane (depth cue) */
-            DrawPlane((Vector3){ 0, 0, WORLD_Z0 }, (Vector2){ WORLD_DX + 400.0f, 800.0f },
+            /* far reference plane (depth cue) at the back of the box, y = WORLD_Y1 */
+            DrawPlane((Vector3){ 0, WORLD_Y1, 0 },
+                      (Vector2){ WORLD_DX + 400.0f, WORLD_Z1 - WORLD_Z0 + 400.0f },
                       (Color){ 20, 24, 36, 255 });
         EndMode3D();
 
